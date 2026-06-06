@@ -1,0 +1,7 @@
+.venv/
+faiss_index/
+*.env
+1.docs
+1.txt
+convert.ps1
+__pycache__/
