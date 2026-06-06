@@ -5,3 +5,4 @@ faiss_index/
 1.txt
 convert.ps1
 __pycache__/
+creds.md

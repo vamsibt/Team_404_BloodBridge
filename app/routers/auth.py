@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
+from typing import Optional
 from app import models
 from app.database import get_db
 from app.security import hash_password, verify_password, create_access_token
@@ -15,6 +16,8 @@ class RegisterRequest(BaseModel):
     phone: str
     password: str
     role: str = 'donor'  # donor | patient | hospital_coordinator
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 
 class LoginRequest(BaseModel):
@@ -44,6 +47,8 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
         phone=req.phone,
         password_hash=hash_password(req.password),
         role=models.UserRole[req.role],
+        latitude=req.latitude,
+        longitude=req.longitude,
     )
     db.add(user)
     db.commit()

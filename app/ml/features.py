@@ -5,9 +5,12 @@ from app.ml.model_loader import BLOOD_GROUP_MAP
 
 def donor_availability_features(donor: models.DonorProfile) -> dict:
     now = datetime.datetime.utcnow()
-    tenure_days = max((now - (donor.created_at or now)).days, 1)
+    created_at = donor.created_at.replace(tzinfo=None) if donor.created_at else now
+    tenure_days = max((now - created_at).days, 1)
+    
+    last_donated_at = donor.last_donated_at.replace(tzinfo=None) if donor.last_donated_at else None
     last_donation_days = (
-        (now - donor.last_donated_at).days if donor.last_donated_at else 365
+        (now - last_donated_at).days if last_donated_at else 365
     )
     return {
         'days_since_last_contact': min(last_donation_days, 400),
@@ -30,9 +33,12 @@ def donor_availability_features(donor: models.DonorProfile) -> dict:
 
 def donor_churn_features(donor: models.DonorProfile) -> dict:
     now = datetime.datetime.utcnow()
-    tenure_days = max((now - (donor.created_at or now)).days, 1)
+    created_at = donor.created_at.replace(tzinfo=None) if donor.created_at else now
+    tenure_days = max((now - created_at).days, 1)
+    
+    last_donated_at = donor.last_donated_at.replace(tzinfo=None) if donor.last_donated_at else None
     last_donation_days = (
-        (now - donor.last_donated_at).days if donor.last_donated_at else 365
+        (now - last_donated_at).days if last_donated_at else 365
     )
     role_encoded = 0 if donor.donor_type == models.BridgeType.bridge else 1
     return {

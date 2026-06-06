@@ -7,6 +7,7 @@ def schedule_first_request(db: Session, patient: models.PatientProfile, plan: mo
     due = datetime.datetime.utcnow() + datetime.timedelta(days=plan.interval_days)
     req = models.TransfusionRequest(
         patient_id=patient.id,
+        requested_date=due,
         packets_required=plan.packets_per_transfusion,
         window_start=due - datetime.timedelta(days=2),
         window_end=due,
@@ -28,6 +29,7 @@ def schedule_next_request(db: Session, patient: models.PatientProfile, plan: mod
     )
     req = models.TransfusionRequest(
         patient_id=patient.id,
+        requested_date=due,
         packets_required=plan.packets_per_transfusion,
         window_start=due - datetime.timedelta(days=2),
         window_end=due,
