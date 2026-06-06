@@ -137,23 +137,31 @@ def find_best_donors(
 
     scored = []
     try:
-        payload = load_model_payload('donor_availability_model.pkl')
+        avail_payload = load_model_payload('donor_availability_model.pkl')
+        churn_payload = load_model_payload('donor_churn_model.pkl')
         for d in donors:
             distance_km = donor_distance_km(d, patient_lat, patient_lon, db) if use_geo else None
             if use_geo and distance_km is not None and distance_km > req.max_distance_km:
                 continue
-            result = predict_with_payload(payload, donor_availability_features(d))
-            label = AVAILABILITY_LABELS.get(result['prediction'], str(result['prediction']))
-            confidence = result.get('confidence') or 0
+            avail_result = predict_with_payload(avail_payload, donor_availability_features(d))
+            churn_result = predict_with_payload(churn_payload, donor_churn_features(d))
+            avail_label = AVAILABILITY_LABELS.get(avail_result['prediction'], str(avail_result['prediction']))
+            churn_label = CHURN_LABELS.get(churn_result['prediction'], str(churn_result['prediction']))
+            confidence = avail_result.get('confidence') or 0
             geo_score = 1.0 / (1.0 + (distance_km or 0)) if use_geo else 0
-            combined = (confidence * 0.6) + (geo_score * 0.4) if use_geo else confidence
+            # Penalize HIGH_RISK churn donors slightly
+            churn_penalty = 0.85 if churn_label == 'HIGH_RISK' else 1.0
+            combined = ((confidence * 0.6) + (geo_score * 0.4)) * churn_penalty if use_geo else confidence * churn_penalty
             scored.append({
                 'id': d.id,
                 'city': d.city,
                 'state': d.state,
+                'blood_type': d.blood_type,
                 'total_donations': d.total_donations,
-                'availability_prediction': label,
+                'availability_prediction': avail_label,
                 'confidence': confidence,
+                'churn_risk': churn_label,
+                'churn_confidence': churn_result.get('confidence'),
                 'distance_km': round(distance_km, 2) if distance_km is not None and distance_km < 9999 else None,
                 'combined_score': round(combined, 4),
             })
@@ -168,6 +176,7 @@ def find_best_donors(
                 'id': d.id,
                 'city': d.city,
                 'state': d.state,
+                'blood_type': d.blood_type,
                 'total_donations': d.total_donations,
                 'distance_km': round(distance_km, 2) if distance_km is not None and distance_km < 9999 else None,
                 'combined_score': round(geo_score, 4) if use_geo else None,
@@ -178,6 +187,78 @@ def find_best_donors(
         'donors': scored[:req.top_k],
         'search_coords': {'latitude': patient_lat, 'longitude': patient_lon} if use_geo else None,
     }
+
+
+@router.get('/priority-requests')
+def get_priority_requests(
+    status: str = 'pending',
+    db: Session = Depends(get_db),
+    admin=Depends(require_admin),
+):
+    """Score all pending requests with the ML priority model and return them sorted."""
+    query_status = getattr(models.RequestStatus, status, models.RequestStatus.pending)
+    requests_list = db.query(models.TransfusionRequest).filter(
+        models.TransfusionRequest.status == query_status
+    ).order_by(models.TransfusionRequest.created_at.desc()).all()
+
+    try:
+        priority_payload = load_model_payload('request_priority_model.pkl')
+    except FileNotFoundError:
+        priority_payload = None
+
+    PRIORITY_ORDER = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
+    results = []
+    for req_obj in requests_list:
+        patient = db.query(models.PatientProfile).filter(
+            models.PatientProfile.id == req_obj.patient_id
+        ).first()
+        if not patient:
+            continue
+        patient_user = db.query(models.User).filter(models.User.id == patient.user_id).first()
+        plan = db.query(models.TransfusionPlan).filter(
+            models.TransfusionPlan.patient_id == patient.id
+        ).first()
+        assigned = 0
+        if patient.current_bridge_id:
+            assigned = db.query(models.BridgeAssignment).filter(
+                models.BridgeAssignment.bridge_id == patient.current_bridge_id
+            ).count()
+
+        priority_label = 'MEDIUM'
+        priority_conf = None
+        if priority_payload:
+            try:
+                p_result = predict_with_payload(
+                    priority_payload, request_priority_features(patient, plan, assigned)
+                )
+                priority_label = PRIORITY_LABELS.get(p_result['prediction'], 'MEDIUM')
+                priority_conf = p_result.get('confidence')
+            except Exception:
+                pass
+
+        results.append({
+            'request_id': req_obj.id,
+            'patient_id': patient.id,
+            'patient_name': patient_user.full_name if patient_user else None,
+            'blood_type': patient.blood_type or (plan.blood_type if plan else None),
+            'city': patient.city,
+            'state': patient.state,
+            'status': req_obj.status.value,
+            'requested_date': req_obj.requested_date,
+            'created_at': req_obj.created_at,
+            'packets_required': req_obj.packets_required,
+            'has_bridge': patient.current_bridge_id is not None,
+            'bridge_donors': assigned,
+            'priority': priority_label,
+            'priority_confidence': priority_conf,
+            'interval_days': plan.interval_days if plan else None,
+            'next_due_date': plan.next_due_date if plan else None,
+        })
+
+    results.sort(key=lambda x: (PRIORITY_ORDER.get(x['priority'], 99), str(x['created_at'])))
+    return results
+
+
 
 
 @router.post('/predict-donor-availability/{donor_id}')
