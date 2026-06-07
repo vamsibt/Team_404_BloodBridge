@@ -18,7 +18,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['*'],
+    allow_origins=[
+        "http://localhost:5173", 
+        "http://bloodbridge-404team.s3-website-us-east-1.amazonaws.com",
+        "http://localhost:8000"
+    ],
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],

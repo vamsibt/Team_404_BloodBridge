@@ -1,5 +1,4 @@
 .venv/
-faiss_index/
 *.env
 1.docs
 1.txt
